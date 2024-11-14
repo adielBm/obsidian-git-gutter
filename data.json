@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "decorationType": "all",
+  "colors": {
+    "added": "#28a745",
+    "modified": "#2188ff",
+    "deleted": "#cb2431"
+  }
+}

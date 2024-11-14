@@ -1,0 +1,9 @@
+{
+	"id": "git-gutter",
+	"name": "git-gutter",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "add git gutter indicators (modified/added/removed lines) like in vscode",
+	"author": "adielBm",
+	"isDesktopOnly": false
+}

@@ -1,0 +1,17 @@
+.git-gutter-marker {
+	width: 3px;
+	height: 100%;
+}
+
+.git-gutter-marker-added {
+	background-color: rgb(42, 196, 42);
+}
+
+.git-gutter-marker-modified {
+	background-color: #3135ff;
+}
+
+.git-gutter-marker-deleted {
+	background-color: rgb(204, 42, 42);
+	height: 2px;
+}
