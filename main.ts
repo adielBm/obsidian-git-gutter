@@ -48,7 +48,7 @@ export default class GitGutterPlugin extends Plugin {
 	private cacheBaseVersion: { [filePath: string]: string } = {}
 	private getBaseVersion(filePath: string): string {
 		if (this.cacheBaseVersion[filePath]) return this.cacheBaseVersion[filePath]
-		const baseVersion = execSync(`git show HEAD:./${filePath}`, {
+		const baseVersion = execSync(`git show HEAD:"./${filePath}"`, {
 			cwd: this.vaultPath,
 			encoding: "utf-8",
 		}).toString()
