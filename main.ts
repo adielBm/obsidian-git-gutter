@@ -11,22 +11,23 @@ interface LineChanges {
 	deleted: number[] // line number i indicates that some line(s) were deleted between lines i-1 and i
 }
 
-class GitDiffGutterMarker extends GutterMarker {
+class GitGutterMarker extends GutterMarker {
 	constructor(private types: GitDiffType[]) {
-	  super();
+		super()
 	}
-  
+
 	toDOM() {
-	  const marker = document.createElement("div");
-	  this.types.forEach((type) => {
-		marker.classList.add(`git-gutter-marker-${type}`);
-	  });
-	  marker.classList.add("git-gutter-marker");
-	  return marker;
+		const marker = document.createElement("div")
+		this.types.forEach((type) => {
+			marker.classList.add(`git-gutter-marker-${type}`)
+		})
+		marker.classList.add("git-gutter-marker")
+		//   console.log("🟢 toDOM")
+		return marker
 	}
-  
-	eq(other: GitDiffGutterMarker) {
-	  return this.types.every((type) => other.types.includes(type));
+
+	eq(other: GitGutterMarker) {
+		return this.types.every((type) => other.types.includes(type))
 	}
 }
 
@@ -34,6 +35,7 @@ export default class GitGutterPlugin extends Plugin {
 	//@ts-ignore
 	private vaultPath: string = this.app.vault.adapter.basePath
 	private cachedDiffs: { [filePath: string]: LineChanges } = {}
+	private isUpdateRequired: boolean = false
 
 	private getDiffsForFile(filePath: string): LineChanges {
 		return this.cachedDiffs[filePath] ?? { added: [], modified: [], deleted: [] }
@@ -43,51 +45,76 @@ export default class GitGutterPlugin extends Plugin {
 		this.cachedDiffs[filePath] = changes
 	}
 
-	private createGutterMarker(types: GitDiffType[]): GitDiffGutterMarker {
-		return new GitDiffGutterMarker(types)
+	private cacheBaseVersion: { [filePath: string]: string } = {}
+	private getBaseVersion(filePath: string): string {
+		if (this.cacheBaseVersion[filePath]) return this.cacheBaseVersion[filePath]
+		const baseVersion = execSync(`git show HEAD:./${filePath}`, {
+			cwd: this.vaultPath,
+			encoding: "utf-8",
+		}).toString()
+		this.cacheBaseVersion[filePath] = baseVersion
+		return baseVersion
 	}
-	
 
 	private gitGutterExtension(): Extension {
 		return gutter({
-			lineMarker: (view: EditorView, line: { from: number }): GutterMarker | null => {
+			lineMarker: (view, line) => {
+				// if (!this.isUpdateRequired) return null
+				const lineNumber = view.state.doc.lineAt(line.from).number
+				// if (view.state.doc.lines <= lineNumber) {
+				// 	this.isUpdateRequired = false
+				// 	return null
+				// }
+
 				const info = view.state.field(editorInfoField)
 				const filePath = info.file?.path
 				const diffs = this.getDiffsForFile(filePath ?? "")
 
-				const lineNumber = view.state.doc.lineAt(line.from).number
 				const types: GitDiffType[] = []
-
 				if (diffs.added.includes(lineNumber)) types.push("added")
 				if (diffs.modified.includes(lineNumber)) types.push("modified")
 				if (diffs.deleted.includes(lineNumber)) types.push("deleted")
 
-				return types.length > 0 ? this.createGutterMarker(types) : null
+				if (types.length > 0) {
+					return new GitGutterMarker(types)
+				}
+				return null
 			},
-			lineMarkerChange: (update: ViewUpdate): boolean => {
-				// Check only for document changes to refresh gutter markers if diffs might have changed.
-				if (update.docChanged) {
-					const info = update.view.state.field(editorInfoField)
-					const filePath = info.file?.path
-					if (filePath) {
-						const diffs = this.getGitDiff(filePath)
-						if (diffs) {
-							this.setDiffsForFile(filePath, diffs)
-							return true
-						}
+			lineMarkerChange: (update) => {
+				if (!update.docChanged) {
+					return false
+				}
+				const info = update.view.state.field(editorInfoField)
+				const filePath = info.file?.path
+				const fileContent = update.view.state.doc.toString()
+				if (filePath) {
+					const diffs = this.getGitDiff(filePath, fileContent)
+					if (diffs) {
+						this.setDiffsForFile(filePath, diffs)
+						this.isUpdateRequired = true
+						return true
 					}
 				}
 				return false
 			},
+			initialSpacer: () => {
+				// console.log("🔴 initialSpacer")
+				return new GitGutterMarker([])
+			},
+			updateSpacer: (spacer) => {
+				// console.log("🌌 updateSpacer")
+				return spacer
+			},
 		})
 	}
-
-
 	async onload() {
 		this.registerEditorExtension(this.gitGutterExtension())
 	}
 
+	/* 
+	OLD:
 	private getGitDiff(fileAbsPath: string): LineChanges|null {
+		console.log("🔵 getGitDiff")
 		try {
 			const gitDiffOutput = execSync(`git diff --unified=0 --no-color ${fileAbsPath}`, {
 				cwd: this.vaultPath,
@@ -99,6 +126,23 @@ export default class GitGutterPlugin extends Plugin {
 			console.error("Error getting git diff:", error.message)
 			return null
 		}
+	} */
+
+	// NEW: using `diff` (npm package)
+	private getGitDiff(filePath: string, currentVersion: string): LineChanges | null {
+		const diff = require("diff")
+		const baseVersion = this.getBaseVersion(filePath)
+
+		// console.log("baseVersion:")
+		// console.log(baseVersion)
+		// console.log("currentVersion:")
+		// console.log(currentVersion)
+
+		const _diff = diff.createPatch("tmp.txt", baseVersion, currentVersion, "", "", { context: 0 })
+		// console.log("diff:")
+		// console.log(_diff)
+		const diffLines = _diff.split("\n")
+		return this.parseDiffNotation(diffLines)
 	}
 
 	public parseDiffNotation(diffLines: string[]): LineChanges {
@@ -106,56 +150,64 @@ export default class GitGutterPlugin extends Plugin {
 			added: [],
 			deleted: [],
 			modified: [],
-		};
-	
+		}
+
 		for (const line of diffLines) {
-			const matches = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-			if (!matches) continue;
-	
-			const oldStart = parseInt(matches[1]);
-			const oldLength = matches[2] ? parseInt(matches[2]) : 1;
-			const newStart = parseInt(matches[3]);
-			const newLength = matches[4] ? parseInt(matches[4]) : 1;
-	
+			const matches = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
+			if (!matches) continue
+
+			// console.log(line)
+
+			const oldStart = parseInt(matches[1])
+			const oldLength = matches[2] ? parseInt(matches[2]) : 1
+			const newStart = parseInt(matches[3])
+			const newLength = matches[4] ? parseInt(matches[4]) : 1
+
 			// Case 1: Deletion
 			if (newLength === 0) {
 				for (let i = 0; i < oldLength; i++) {
-					result.deleted.push(oldStart + i);
+					result.deleted.push(oldStart + i)
 				}
-				continue;
+				continue
 			}
-	
+
 			// Case 2: Addition
 			if (oldLength === 0) {
 				for (let i = 0; i < newLength; i++) {
-					result.added.push(newStart + i);
+					result.added.push(newStart + i)
 				}
-				continue;
+				continue
 			}
-	
+
 			// Case 3: Modification (when oldLength and newLength are both non-zero)
-			const modifiedStart = Math.max(oldStart, newStart);
-			const modifiedEnd = Math.min(oldStart + oldLength, newStart + newLength);
-	
+			const modifiedStart = Math.max(oldStart, newStart)
+			const modifiedEnd = Math.min(oldStart + oldLength, newStart + newLength)
+
 			// Track modified lines
 			for (let i = modifiedStart; i < modifiedEnd; i++) {
-				result.modified.push(i);
+				result.modified.push(i)
 			}
-	
+
 			// If newLength > oldLength, those extra lines are added
 			if (newLength > oldLength) {
 				for (let i = oldLength; i < newLength; i++) {
-					result.added.push(newStart + i);
+					result.added.push(newStart + i)
 				}
 			}
 		}
-	
+
 		// Sort and remove duplicates
-		result.added = [...new Set(result.added)].sort((a, b) => a - b);
-		result.deleted = [...new Set(result.deleted)].sort((a, b) => a - b);
-		result.modified = [...new Set(result.modified)].sort((a, b) => a - b);
-	
-		return result;
+		result.added = [...new Set(result.added)].sort((a, b) => a - b)
+		result.deleted = [...new Set(result.deleted)].sort((a, b) => a - b)
+		result.modified = [...new Set(result.modified)].sort((a, b) => a - b)
+
+		// console.log("📘parseDiffNotation📘")
+		// console.log("🟢 added:", result.added)
+		// console.log("🔵 modified:", result.modified)
+		// console.log("🔴 deleted:", result.deleted)
+		// console.log("📘-----------------📘")
+
+		return result
 	}
 
 	onunload() {
