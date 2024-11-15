@@ -46,16 +46,21 @@ export default class GitGutterPlugin extends Plugin {
 	}
 
 	private cacheBaseVersion: { [filePath: string]: string } = {}
-	private getBaseVersion(filePath: string): string {
+	
+	private getBaseVersion(filePath: string): string|null {
 		if (this.cacheBaseVersion[filePath]) return this.cacheBaseVersion[filePath]
-		const baseVersion = execSync(`git show HEAD:"./${filePath}"`, {
-			cwd: this.vaultPath,
-			encoding: "utf-8",
-		}).toString()
-		this.cacheBaseVersion[filePath] = baseVersion
-		return baseVersion
+		try {
+			const baseVersion = execSync(`git show HEAD:"./${filePath}"`, {
+				cwd: this.vaultPath,
+				encoding: "utf-8",
+			}).toString()
+			this.cacheBaseVersion[filePath] = baseVersion
+			return baseVersion
+		} catch (error) {
+			return null
+		}
 	}
-
+	
 	private gitGutterExtension(): Extension {
 		return gutter({
 			lineMarker: (view, line) => {
@@ -131,7 +136,9 @@ export default class GitGutterPlugin extends Plugin {
 	// NEW: using `diff` (npm package)
 	private getGitDiff(filePath: string, currentVersion: string): LineChanges | null {
 		const diff = require("diff")
+		
 		const baseVersion = this.getBaseVersion(filePath)
+		if (!baseVersion) return null
 
 		// console.log("baseVersion:")
 		// console.log(baseVersion)
